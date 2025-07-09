@@ -1,0 +1,67 @@
+name: Run Script & Deploy HTML
+
+# can be triggered manually or on pushes to main
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  run-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Check out your code
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 2. Run your script in the background and record its PID
+      - name: Run script
+        id: run_script
+        run: |
+          echo "🔄 Starting script..."
+          chmod +x ./script.sh
+          ./script.sh > script.log 2>&1 &
+          echo $! > script.pid
+          echo "Script is running with PID $(cat script.pid)"
+      
+      # 3. Wait for it to finish
+      - name: Wait for script to complete
+        run: |
+          PID=$(cat script.pid)
+          wait $PID
+          EXIT_CODE=$?
+          echo "✅ Script finished with exit code $EXIT_CODE"
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "❌ Exiting early because script failed."
+            exit $EXIT_CODE
+          fi
+
+      # 4. Check for HTML output
+      - name: Check for HTML file
+        id: check_html
+        run: |
+          if [ -f output/report.html ]; then
+            echo "::set-output name=html_exists::true"
+            echo "✅ Found HTML at output/report.html"
+          else
+            echo "::set-output name=html_exists::false"
+            echo "⚠️ No HTML found in output/"
+          fi
+
+      # 5. Upload the HTML as an artifact (so you can download it from the run)
+      - name: Upload HTML artifact
+        if: steps.check_html.outputs.html_exists == 'true'
+        uses: actions/upload-artifact@v3
+        with:
+          name: html-report
+          path: output/report.html
+
+      # 6. Deploy to GitHub Pages
+      - name: Deploy to GitHub Pages
+        if: steps.check_html.outputs.html_exists == 'true'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: output
